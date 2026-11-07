@@ -35,11 +35,11 @@ clean:
 # Checks ClickHouse availability.
 
 check-running:
->@$(COMPOSE) exec -T clickhouse clickhouse-client --user "$(CLICKHOUSE_USER)" --password "$(CLICKHOUSE_PASSWORD)" --query "SELECT 1" || (echo ERROR: ClickHouse is unavailable. Run make run first. & exit /b 1)
+> python scripts/wait_clickhouse.py
 
 # Removes tables and data.
 teardown: check-running
->python scripts/run_sql.py sql/teardown.sql
+> python scripts/run_sql.py sql/teardown.sql
 
 # Creates the star schema.
 schema: check-running
