@@ -1,0 +1,35 @@
+services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:26.7
+    container_name: clickhouse
+    ports:
+      - "${CLICKHOUSE_HTTP_PORT}:${CLICKHOUSE_HTTP_PORT}"
+      - "${CLICKHOUSE_PORT}:${CLICKHOUSE_PORT}"
+    environment:
+      CLICKHOUSE_DB: ${CLICKHOUSE_DATABASE}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    volumes:
+      - ./volume:/var/lib/clickhouse
+
+  api:
+    build:
+      context: .
+      dockerfile: app/Dockerfile
+
+    container_name: energosbyt-api
+
+    ports:
+      - "${APP_PORT}:${APP_PORT}"
+
+    environment:
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: ${CLICKHOUSE_PORT:?CLICKHOUSE_PORT_required}
+      CLICKHOUSE_HTTP_PORT: ${CLICKHOUSE_HTTP_PORT:?CLICKHOUSE_HTTP_PORT_required}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:?CLICKHOUSE_USER_required}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD?CLICKHOUSE_PASSWORD_required}
+      CLICKHOUSE_DATABASE: ${CLICKHOUSE_DATABASE:?CLICKHOUSE_DATABASE_required}
+
+    depends_on:
+      - clickhouse

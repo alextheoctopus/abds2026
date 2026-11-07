@@ -1,48 +1,137 @@
-# Лабораторный проект
 
-[![labs](https://github.com/{your_username}/{your_repo}/actions/workflows/energosbyt.energosbyt.lab.yml/badge.svg)](https://github.com/{your_username}/{your_repo}/actions/workflows/energosbyt.energosbyt.lab.yml)
+# Лабораторная №1. ClickHouse — ЭнергоСбыт
 
-Backend-сервис вымышленной ЖКХ-компании для практики по курсу «Архитектура систем обработки больших данных».
+## Цель работы
 
-## С чего начать
+Разработать хранилище данных ЖКХ-компании «ЭнергоСбыт» на ClickHouse с использованием схемы «звезда», реализовать SCD 1/2/3 и проверить работу движков MergeTree, ReplacingMergeTree и VersionedCollapsingMergeTree через SQL и HTTP API.
 
-1. **‼️ Настройте репозиторий** — проведите обязательную настройку контрибьюторов и защиты ветки (см. ниже)
-2. **[Лабораторные работы](https://github.com/sitnikovik/abds/tree/master/lab)** — технические задания для каждой лабораторной работы
-3. **[CONTRIBUTING.md](CONTRIBUTING.md)** — требования к структуре проекта, процесс разработки и проверки
-4. **[Документация курса](https://github.com/sitnikovik/abds)** — методические материалы и дополнительные ресурсы
+## Технологии
 
-> [!IMPORTANT]
-> Поменяйте `{your_username}` и `{your_repo}` в badge на ваши имя пользователя и название репозитория.
+- **ClickHouse 26.7** — хранение и обработка данных.
+- **Docker Compose** — запуск контейнеров.
+- **Python** — генерация и загрузка CSV.
+- **FastAPI** — HTTP-сервис.
+- **Makefile** — автоматизация команд.
 
-## Настройка репозитория
+## Структура данных
 
-### Защита основной ветки
+Созданы 7 таблиц:
 
-После создания репозитория из шаблона **обязательно настройте правила защиты для ветки `main`**:
+| Таблица | Движок | Назначение |
+|---|---|---|
+| `dim_realty` | MergeTree | Объекты недвижимости |
+| `dim_gauges` | MergeTree | Счётчики |
+| `dim_tariffs` | ReplacingMergeTree | История тарифов (SCD 2) |
+| `dim_users` | ReplacingMergeTree | Собственники (SCD 1/3) |
+| `fact_gauge_bindings` | VersionedCollapsingMergeTree | Установки и аннулирования счётчиков |
+| `fact_meter_readings` | ReplacingMergeTree | Показания и корректировки |
+| `fact_invoice` | MergeTree | Выставленные счета |
 
-1. Откройте **Settings** → **Branches** → **Add classic branch protection rule**
-2. В поле **Branch name pattern** укажите: `main`
-3. Включите следующие опции:
-   - **Require a pull request before merging**
-     - Require approvals: **1**: требует минимум одного одобрения перед слиянием
-   - ***Require status checks to pass before merging***
-     - Выберите *"autograder"*: проверит все лабораторные работы автоматически
-     - ***Require branches to be up to date before merging*** (рекомендуется):
-     требует, чтобы ветка PR была синхронизирована с последними изменениями из основной ветки перед слиянием
-   - ***Do not allow bypassing the above settings***: запрещает обход настроек защиты ветки
-4. Нажмите **Create** или **Save changes**
+### Обоснование ключей и партиционирования
 
-> ⚠️ **Важно:** Без этих настроек автоматические проверки не будут блокировать PR с ошибками.
+- Измерения сортируются по идентификаторам для эффективного поиска.
+- `dim_tariffs`: `ORDER BY (id, valid_from)` позволяет сохранять исторические версии одного тарифа.
+- `dim_users`: `ORDER BY id` обеспечивает выбор актуальной версии собственника.
+- `fact_gauge_bindings`: `ORDER BY (gauge_id, realty_id)` обеспечивает сопоставление установки и аннулирования.
+- `fact_meter_readings`: партиционирование по месяцу показания, сортировка по `(realty_id, gauge_id, reading_date)`.
+- `fact_invoice`: партиционирование по месяцу выставления счёта, сортировка по `(realty_id, deadline, gauge_id, created_at)`.
 
-### Добавление коллабораторов
+Месячное партиционирование таблиц фактов упрощает обработку данных за отдельные периоды.
 
-Чтобы преподаватели могли проводить код-ревью:
+## Генерация данных
 
-1. Откройте **Settings** → **Collaborators**
-2. Нажмите **Add people**
-3. Добавьте всех кто есть в списке ревьюеров в файле [CODEOWNERS](CODEOWNERS)
-4. Выберите роль: **Write** (или выше), иначе ревьюер не сможет одобрить PR
+Команда `make gen` создаёт 7 CSV-файлов в папке `data/`.
 
-## Помощь
+| Таблица | Количество строк |
+|---|---:|
+| dim_realty | 1 000 |
+| dim_gauges | 1 100 |
+| dim_tariffs | 2 |
+| dim_users | 1 000 |
+| fact_gauge_bindings | 1 200 |
+| fact_meter_readings | 1 128 901 |
+| fact_invoice | 36 000 |
 
-Возникли вопросы? → [@sitnikovik](https://t.me/sitnikovik)
+Данные включают замены счётчиков, исторические версии тарифов и около 3% корректировок показаний.
+
+Повторный `make load` очищает таблицы перед загрузкой, предотвращая накопление дубликатов.
+
+## Запуск
+
+```bash
+make run       # Запустить ClickHouse и HTTP-сервис
+make setup     # Создать таблицы, сгенерировать и загрузить данные
+make stop      # Остановить контейнеры
+make teardown  # Удалить таблицы
+```
+
+HTTP-сервис доступен по адресу `http://localhost:8080`.
+
+Swagger UI: `http://localhost:8080/docs`.
+
+Конфигурация задаётся через `.env.local`.
+
+## Проверка сценариев
+
+Все сценарии проверены через HTTP-сервис и SQL.
+
+| Сценарий | Реализация и проверка |
+|---|---|
+| SCD 1 | `ALTER TABLE dim_users UPDATE fio ...` — старое ФИО заменено |
+| SCD 3 | `UPDATE phone_prev = phone, phone = ...` — сохраняется предыдущий телефон |
+| SCD 2 | `dim_tariffs` хранит версии с разными `valid_from` / `valid_to`; выбор по дате |
+| Исторические счета | Старые счета сохраняют первоначальную стоимость |
+| Корректировка показаний | `INSERT` с новым `created_at`; `SELECT FINAL` возвращает одну версию |
+| Замена счётчика | `sign = -1` аннулирует установку; новая получает следующую `version` |
+| DELETE | `DELETE FROM fact_invoice WHERE ...` удаляет ошибочную запись |
+
+### Примеры SQL-проверок
+
+**SCD 1 и SCD 3:**
+
+```sql
+SELECT id, fio, phone, phone_prev
+FROM energosbyt.dim_users FINAL
+WHERE id = 1;
+```
+
+**SCD 2:**
+
+```sql
+SELECT *
+FROM energosbyt.dim_tariffs FINAL
+ORDER BY id, valid_from;
+```
+
+**Корректировки показаний:**
+
+```sql
+SELECT *
+FROM energosbyt.fact_meter_readings FINAL
+WHERE realty_id = 1
+  AND reading_date = '2026-10-01';
+```
+
+**Активные установки счётчиков:**
+
+```sql
+SELECT gauge_id, realty_id, sum(sign) AS active
+FROM energosbyt.fact_gauge_bindings
+GROUP BY gauge_id, realty_id
+HAVING active > 0;
+```
+
+**DELETE:**
+
+```sql
+DELETE FROM energosbyt.fact_invoice
+WHERE realty_id = 1
+  AND price = 930000
+  AND created_at = '2026-11-07 12:00:00';
+```
+
+Повторный `SELECT` по тем же условиям возвращает 0 строк.
+
+## Результат
+
+Реализованы хранилище данных ClickHouse, генерация и загрузка датасетов, HTTP API и сценарии SCD 1/2/3. Проверены корректировки показаний, аннулирование установок счётчиков и удаление ошибочных записей.
