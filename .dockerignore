@@ -1,0 +1,9 @@
+
+data/
+volume/
+.git/
+.idea/
+.env.local
+__pycache__/
+*.pyc
+.venv/
